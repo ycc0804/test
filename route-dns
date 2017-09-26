@@ -1,0 +1,2345 @@
+#!/bin/bash
+# 用于在长宽8台dns上添加到ICP DNS服务器的路由
+# When you add a DNS server, these need to be added:
+#	IP_dns?=
+#	GW_dns?=
+#	get_my_ip() - add a match variable
+#	'case `get_my_ip` in' part.
+LOG=`realpath $0`.log
+MANUAL_MODE=1
+NXIP="127.126.125.124
+124.14.10.117
+124.14.8.196
+"
+case ${HOSTNAME} in
+	dns[7])		NIC="eno1";;
+	dns[4])		NIC="eth2";;
+	dns[25])	NIC="eth4";;
+	SH-RE-1.shpbs.com)        NIC="em1";;
+	SH-RE-2.shpbs.com)      NIC="em1";;
+	SH-RE-3.shpbs.com)      NIC="em4";;
+	SH-RE-4.shpbs.com)      NIC="em4";;
+	*)		NIC="eth0"
+esac
+ADDRESS_LIST=		# init first, used while add/del.
+ADDRESS_LIST_ALL=	# init first, contains all domainname or IP segments.
+
+# 'ip' command must be exist.
+which ip >/dev/null 2>&1 || {
+	echo "'ip' command not found, exit now"
+	exit 1
+}
+
+# root only program
+[ $EUID -ne 0 ] && {
+	echo "Only for root"
+	exit 1
+}
+
+# ip/gw pairs
+IP_dns1="211.161.192.1"
+GW_dns1="211.161.192.6"
+
+IP_dns2="211.161.192.73"
+GW_dns2="211.161.192.76"
+
+IP_dns3="211.161.192.13"
+GW_dns3="211.161.192.14"
+
+IP_dns4="220.115.251.73"
+GW_dns4="220.115.251.74"
+
+IP_dns5="211.161.192.9"
+GW_dns5="211.161.192.10"
+
+IP_dns6="211.161.192.65"
+GW_dns6="211.161.192.70"
+
+IP_dns7="211.161.192.66"
+GW_dns7="211.161.192.70"
+
+IP_dns8="211.161.192.67"
+GW_dns8="211.161.192.70"
+
+IP_ns1="101.44.0.58"
+GW_ns1="101.44.0.49"
+
+IP_ns2="101.44.0.57"
+GW_ns2="101.44.0.49"
+
+IP_ns5="211.161.192.89"
+GW_ns5="211.161.192.94"
+
+IP_ns6="211.161.192.90"
+GW_ns6="211.161.192.94"
+
+IP_ns7="211.161.192.91"
+GW_ns7="211.161.192.94"
+
+IP_ns8="211.161.192.92"
+GW_ns8="211.161.192.94"
+
+IP_yd1="211.161.193.129"
+GW_yd1="211.161.193.134"
+
+IP_yd2="211.161.193.130"
+GW_yd2="211.161.193.134"
+
+IP_yd3="211.161.192.68"
+GW_yd3="211.161.192.70"
+
+IP_yd4="211.161.192.69"
+GW_yd4="211.161.192.70"
+
+IP_re1="211.161.250.41"
+GW_re1="211.161.250.46"
+
+IP_re2="211.161.250.42"
+GW_re2="211.161.250.46"
+
+IP_re3="211.161.192.36"
+GW_re3="211.161.192.38"
+
+IP_re4="211.161.192.35"
+GW_re4="211.161.192.38"
+
+IP_test="1.1.1.1"
+GW_test="1.1.1.2"
+
+MYDNS=$IP_dns1
+
+ADDRESS_LIST_ALL="
+##### CDN provider #####
+# TAG: DiLian CDN
+# DNS域名后面跟的IP都是帝联给的,让我们把整个域转发到这些IP
+# tlgslb.com
+dns1.tlgslb.com
+dns2.tlgslb.com
+dns3.tlgslb.com
+dns4.tlgslb.com
+dns5.tlgslb.com
+dns6.tlgslb.com
+58.221.37.144
+180.153.116.246
+222.73.184.197
+122.11.48.182
+123.125.163.61
+120.209.132.6
+121.9.221.96
+122.225.251.146
+122.228.203.145
+125.64.129.88
+60.28.227.11
+125.64.148.135
+60.28.183.6
+58.221.40.80
+58.221.40.74
+58.221.40.75
+58.221.40.76
+122.11.46.91
+121.14.254.31
+183.131.86.24
+220.166.65.88
+125.39.237.30
+219.153.76.161
+119.84.107.57
+
+# TAG: Ucloud CDN
+ns1.cdndo.com
+ns2.cdndo.com
+ns3.cdndo.com
+ns4.cdndo.com
+ns5.cdndo.com
+
+# fastcdn.com
+dns1.fastcdn.com
+dns2.fastcdn.com
+dns3.fastcdn.com
+dns4.fastcdn.com
+dns5.fastcdn.com
+dns6.fastcdn.com
+dns7.fastcdn.com
+202.120.161.67
+211.154.219.19
+122.11.48.181
+61.129.57.10
+60.28.227.10
+60.28.227.13
+58.221.37.145
+60.28.160.53
+58.221.247.79
+60.210.23.14
+60.210.23.73
+59.39.31.41
+125.64.131.2
+118.123.112.40
+# ewcache.com
+ns1.ewcache.com
+ns2.ewcache.com
+ns3.ewcache.com
+ns4.ewcache.com
+60.28.161.158
+60.28.183.99
+115.238.226.71
+122.228.218.36
+59.39.31.40
+180.153.116.245
+# flxdns.com
+dns1.flxdns.com
+dns2.flxdns.com
+dns3.flxdns.com
+dns4.flxdns.com
+dns5.flxdns.com
+222.73.177.166
+123.125.163.93
+121.9.240.239
+60.210.16.92
+122.228.218.80
+# globalcdn.cn
+123.125.163.24
+222.73.184.196
+121.9.240.230
+60.210.16.102
+60.28.183.179
+# dn-dns.com
+dns2.dn-dns.com
+dns3.dn-dns.com
+dns4.dn-dns.com
+# ttxshy.com
+dns1.ttxshy.com
+dns2.ttxshy.com
+# gls.acadn.com
+dns1.acadn.com
+dns2.acadn.com
+dns3.acadn.com
+dns4.acadn.com
+dns5.acadn.com
+ns.acadn.com
+122.11.50.159
+203.110.169.43
+58.67.161.27
+61.155.106.90
+111.161.19.62
+61.153.108.34
+121.11.70.131
+
+# TAG: KuaiWang CDN
+# hacdn.net
+122.228.227.139
+183.61.182.139
+61.190.112.9
+124.126.251.55
+124.126.251.56
+118.180.0.9
+ns1.hacdn.net
+ns2.hacdn.net
+ns3.hacdn.net
+ns4.hacdn.net
+ns5.hacdn.net
+ns6.hacdn.net
+ns7.hacdn.net
+ns8.hacdn.net
+ns1.cloudtcp.net
+ns2.cloudtcp.net
+ns3.cloudtcp.net
+ns4.cloudtcp.net
+ns5.cloudtcp.net
+ns6.cloudtcp.net
+ns7.cloudtcp.net
+ns8.cloudtcp.net
+# hadns.net
+ns1.hadns.net
+ns2.hadns.net
+ns3.hadns.net
+ns4.hadns.net
+ns5.hadns.net
+ns6.hadns.net
+ns7.hadns.net
+ns8.hadns.net
+# cachecn.com
+ns1.cachecn.com
+ns2.cachecn.com
+ns3.cachecn.com
+ns4.cachecn.com
+ns5.cachecn.com
+ns6.cachecn.com
+ns7.cachecn.com
+ns8.cachecn.com
+# cloudcdn.net
+ns1.sz-dns.net
+ns2.sz-dns.net
+ns3.sz-dns.net
+ns4.sz-dns.net
+ns5.sz-dns.net
+ns6.sz-dns.net
+# cloudglb.com
+ns1.cloudglb.com
+ns2.cloudglb.com
+ns3.cloudglb.com
+ns4.cloudglb.com
+ns5.cloudglb.com
+ns6.cloudglb.com
+ns7.cloudglb.com
+ns8.cloudglb.com
+ns9.cloudglb.com
+ns10.cloudglb.com
+# ctycdn.net
+ns1.ctycdn.net
+ns2.ctycdn.net
+ns3.ctycdn.net
+ns4.ctycdn.net
+# ctycdn.com
+ns1.ctycdn.com
+ns2.ctycdn.com
+ns3.ctycdn.com
+ns4.ctycdn.com
+# fastweb.com.cn
+# 此域名暂时无业务
+
+# TAG: LanXun CDN
+# All postfixes:
+#	ccgslb.com
+#	ccgslb.com.cn
+#	ccgslb.net
+#	chinacache.net
+#	speedupchinacache.net
+#	lxsvc.cn
+#	xgslb.net
+#	xgslb.com
+# ccgslb.net
+ns1.ccgslb.net
+ns2.ccgslb.net
+ns3.ccgslb.net
+ns6.ccgslb.net
+ns8.ccgslb.net
+ns12.ccgslb.net
+ns15.ccgslb.net
+ns16.ccgslb.net
+ns17.ccgslb.net
+ns18.ccgslb.net
+ns19.ccgslb.net
+ns4.ccgslb.net
+ns5.ccgslb.net
+ns7.ccgslb.net
+ns1.cnc.ccgslb.net
+ns2.cnc.ccgslb.net
+ns6.cnc.ccgslb.net
+ns7.cnc.ccgslb.net
+ns8.cnc.ccgslb.net
+ns9.cnc.ccgslb.net
+ns10.cnc.ccgslb.net
+ns11.cnc.ccgslb.net
+ns12.cnc.ccgslb.net
+ns13.cnc.ccgslb.net
+ns12.cnc.ccgslb.net
+ns21.cnc.ccgslb.net
+ns22.cnc.ccgslb.net
+ns3.cnc.ccgslb.net
+ns10.cnc.ccgslb.net
+ns9.cnc.ccgslb.net
+ns1.tel.ccgslb.net
+ns2.tel.ccgslb.net
+ns3.tel.ccgslb.net
+ns5.tel.ccgslb.net
+ns8.tel.ccgslb.net
+ns9.tel.ccgslb.net
+ns10.tel.ccgslb.net
+ns11.tel.ccgslb.net
+ns12.tel.ccgslb.net
+ns13.tel.ccgslb.net
+ns14.tel.ccgslb.net
+ns15.tel.ccgslb.net
+ns16.tel.ccgslb.net
+ns17.tel.ccgslb.net
+ns12.tel.ccgslb.net
+ns13.tel.ccgslb.net
+ns16.tel.ccgslb.net
+ns18.tel.ccgslb.net
+ns22.tel.ccgslb.net
+ns21.tel.ccgslb.net
+# ccgslb.com
+ns2.ccgslb.com
+ns7.ccgslb.com
+ns8.ccgslb.com
+ns9.ccgslb.com
+ns14.ccgslb.com
+ns15.ccgslb.com
+ns17.ccgslb.com
+# ccgslb.com.cn
+ns1.ccgslb.com.cn
+ns2.ccgslb.com.cn
+ns4.ccgslb.com.cn
+ns5.ccgslb.com.cn
+ns6.ccgslb.com.cn
+ns7.ccgslb.com.cn
+ns12.ccgslb.com.cn
+ns15.ccgslb.com.cn
+ns16.ccgslb.com.cn
+ns17.ccgslb.com.cn
+ns19.ccgslb.com.cn
+ns20.ccgslb.com.cn
+ns21.ccgslb.com.cn
+ns22.ccgslb.com.cn
+ns23.ccgslb.com.cn
+ns24.ccgslb.com.cn
+ns25.ccgslb.com.cn
+ns26.ccgslb.com.cn
+ns1.cnc.ccgslb.com.cn
+ns4.cnc.ccgslb.com.cn
+ns5.cnc.ccgslb.com.cn
+ns6.cnc.ccgslb.com.cn
+ns7.cnc.ccgslb.com.cn
+ns8.cnc.ccgslb.com.cn
+ns9.cnc.ccgslb.com.cn
+ns10.cnc.ccgslb.com.cn
+ns11.cnc.ccgslb.com.cn
+ns12.cnc.ccgslb.com.cn
+ns13.cnc.ccgslb.com.cn
+ns14.cnc.ccgslb.com.cn
+ns15.cnc.ccgslb.com.cn
+ns16.cnc.ccgslb.com.cn
+ns17.cnc.ccgslb.com.cn
+ns18.cnc.ccgslb.com.cn
+ns19.cnc.ccgslb.com.cn
+ns20.cnc.ccgslb.com.cn
+ns21.cnc.ccgslb.com.cn
+ns22.cnc.ccgslb.com.cn
+ns23.cnc.ccgslb.com.cn
+ns24.cnc.ccgslb.com.cn
+ns25.cnc.ccgslb.com.cn
+ns26.cnc.ccgslb.com.cn
+ns27.cnc.ccgslb.com.cn
+ns1.tel.ccgslb.com.cn
+ns2.tel.ccgslb.com.cn
+ns3.tel.ccgslb.com.cn
+ns5.tel.ccgslb.com.cn
+ns6.tel.ccgslb.com.cn
+ns7.tel.ccgslb.com.cn
+ns8.tel.ccgslb.com.cn
+ns9.tel.ccgslb.com.cn
+ns10.tel.ccgslb.com.cn
+ns13.tel.ccgslb.com.cn
+ns14.tel.ccgslb.com.cn
+ns15.tel.ccgslb.com.cn
+ns16.tel.ccgslb.com.cn
+ns17.tel.ccgslb.com.cn
+ns21.tel.ccgslb.com.cn
+ns22.tel.ccgslb.com.cn
+# chinacache.net
+ns1.chinacache.net
+ns2.chinacache.net
+ns3.chinacache.net
+ns4.chinacache.net
+ns5.chinacache.net
+ns6.chinacache.net
+ns7.chinacache.net
+ns8.chinacache.net
+ns10.chinacache.net
+ns12.chinacache.net
+ns15.chinacache.net
+ns16.chinacache.net
+ns17.chinacache.net
+ns18.chinacache.net
+ns19.chinacache.net
+ns21.chinacache.net
+ns22.chinacache.net
+ns23.chinacache.net
+ns24.chinacache.net
+ns100.chinacache.net
+ns2.cnc.chinacache.net
+ns3.cnc.chinacache.net
+ns4.cnc.chinacache.net
+ns1.cncssr.chinacache.net
+ns2.cncssr.chinacache.net
+ns3.cncssr.chinacache.net
+ns4.cncssr.chinacache.net
+ns5.cncssr.chinacache.net
+ns6.cncssr.chinacache.net
+ns7.cncssr.chinacache.net
+ns9.cncssr.chinacache.net
+ns11.cncssr.chinacache.net
+ns12.cncssr.chinacache.net
+ns13.cncssr.chinacache.net
+ns14.cncssr.chinacache.net
+ns15.cncssr.chinacache.net
+ns16.cncssr.chinacache.net
+ns17.cncssr.chinacache.net
+ns19.cncssr.chinacache.net
+ns20.cncssr.chinacache.net
+ns21.cncssr.chinacache.net
+ns22.cncssr.chinacache.net
+ns23.cncssr.chinacache.net
+ns24.cncssr.chinacache.net
+ns1.tel.chinacache.net
+ns2.tel.chinacache.net
+ns3.tel.chinacache.net
+ns1.telssr.chinacache.net
+ns2.telssr.chinacache.net
+ns4.telssr.chinacache.net
+ns5.telssr.chinacache.net
+ns6.telssr.chinacache.net
+ns8.telssr.chinacache.net
+ns9.telssr.chinacache.net
+ns11.telssr.chinacache.net
+ns12.telssr.chinacache.net
+ns13.telssr.chinacache.net
+ns14.telssr.chinacache.net
+ns15.telssr.chinacache.net
+ns16.telssr.chinacache.net
+ns17.telssr.chinacache.net
+ns18.telssr.chinacache.net
+ns19.telssr.chinacache.net
+# lxsvc.cn
+ns1.lxsvc.cn
+ns2.lxsvc.cn
+ns3.lxsvc.cn
+ns6.lxsvc.cn
+ns7.lxsvc.cn
+ns8.lxsvc.cn
+# xgslb.net
+ns1.xgslb.net
+ns2.xgslb.net
+ns3.xgslb.net
+ns4.xgslb.net
+nsx1.xgslb.net
+nsx3.xgslb.net
+
+# TAG: WangSu CDN
+# lxdns.com
+ns1.lxdns.com
+ns2.lxdns.com
+ns3.lxdns.com
+ns4.lxdns.com
+ns5.lxdns.com
+n1.lxdns.com
+n2.lxdns.com
+n3.lxdns.com
+n4.lxdns.com
+n5.lxdns.com
+dns1.speedcdns.info
+dns2.speedcdns.info
+dns3.speedcdns.info
+dns4.speedcdns.info
+dns5.speedcdns.info
+# glb0.lxdns.com, 下面几个地址都是这个域名的DNS
+# 125.78.241.150	# ns1.glb0.lxdns.com removed, 2013-01-18
+220.162.97.201	# ns1.glb0.lxdns.com added, 2014-05-12
+61.158.133.40	# ns2.glb0.lxdns.com
+112.124.27.108	# ns3.glb0.lxdns.com
+# 218.60.31.153	# ns4.glb0.lxdns.com removed, 2012-12-12
+220.162.97.203	# ns4.glb0.lxdns.com added, 2012-05-12
+125.39.1.116	# ns5.glb0.lxdns.com
+175.25.171.11
+222.163.201.17
+125.39.1.113
+111.202.74.156
+220.162.97.202
+139.209.90.42
+183.131.210.112
+111.202.74.154
+218.76.105.64
+60.220.197.11
+222.218.45.170
+221.202.204.227
+113.107.112.205
+115.231.20.69
+222.163.201.19
+111.202.74.147
+180.97.178.220
+113.107.112.236
+221.202.204.232
+150.138.173.201
+113.107.57.72
+14.215.100.33
+14.215.93.35
+60.223.235.133
+113.107.57.68
+222.186.18.62
+61.158.133.42
+113.107.57.70
+125.39.1.117
+115.231.84.171
+115.231.87.249
+58.220.6.137
+ns1.glb0.lxdns.com
+ns2.glb0.lxdns.com
+ns3.glb0.lxdns.com
+ns4.glb0.lxdns.com
+ns5.glb0.lxdns.com
+# image.suning.cn
+gns2.zdnscloud.net.cn
+gns1.zdnscloud.net
+lns1.zdnscloud.info
+lns2.zdnscloud.biz
+# wscdns.com
+ns1.wscdns.com
+ns2.wscdns.com
+ns3.wscdns.com
+ns4.wscdns.com
+ns5.wscdns.com
+# wasu.cn
+ns1.wasu.cn
+ns2.wasu.cn
+ns3.wasu.cn
+ns4.wasu.cn
+# lecloud.com
+ns1.lecloud.com
+ns2.lecloud.com
+ns3.lecloud.com
+ns4.lecloud.com
+ns1.cdnle.com
+ns2.cdnle.com
+ns3.cdnle.com
+ns4.cdnle.com
+ns5.cdnle.com
+# cdnle.com
+123.126.32.220
+106.38.226.228
+115.182.200.243
+119.147.182.213
+119.188.180.227
+# lsyun.net
+123.59.126.241
+123.125.36.248
+36.110.223.246
+124.95.177.14
+115.238.243.244
+# gslb.lecloud.com
+123.125.36.245
+123.59.126.242
+36.110.223.99
+ns1.gslb.coop.lecloud.com
+ns2.gslb.coop.lecloud.com
+ns3.gslb.coop.lecloud.com
+ns4.gslb.coop.lecloud.com
+ns5.gslb.coop.lecloud.com
+ns6.gslb.coop.lecloud.com
+ns7.gslb.coop.lecloud.com
+ns8.gslb.coop.lecloud.com
+ns1.gslb.lecloud.com
+ns2.gslb.lecloud.com
+dns1.ourglb0.info
+dns2.ourglb0.info
+dns3.ourglb0.info
+dns4.ourglb0.info
+dns1.ourglb0.org
+dns2.ourglb0.org
+dns3.ourglb0.org
+# WangSu all NS IPs
+114.114.116.138
+106.38.250.143
+107.155.17.59
+107.155.21.130
+107.155.29.130
+110.53.182.78
+111.12.13.162
+111.20.128.227
+111.23.12.40
+111.40.216.74
+111.47.198.137
+111.7.175.135
+112.253.2.205
+112.25.85.9
+112.29.134.75
+112.5.61.115
+113.13.30.116
+113.207.31.202
+113.207.37.131
+113.6.235.243
+113.6.248.75
+114.80.216.202
+115.231.223.11
+116.114.17.101
+116.55.253.141
+117.131.199.67
+117.139.22.76
+117.145.178.171
+117.169.17.201
+117.23.59.51
+1.180.238.212
+119.254.210.112
+1.193.152.82
+119.84.53.202
+120.41.38.67
+122.143.7.211
+122.143.7.212
+122.70.129.50
+123.134.184.140
+123.138.255.133
+123.59.102.14
+123.59.102.18
+124.126.250.69
+124.14.10.99
+124.239.189.5
+125.17.240.6
+125.39.59.20
+125.64.98.17
+139.209.92.72
+14.18.201.81
+150.138.141.86
+153.36.201.18
+163.177.115.100
+171.15.197.95
+1.82.232.14
+183.131.160.178
+183.131.64.216
+183.2.219.210
+183.245.146.21
+183.61.63.115
+203.19.33.30
+218.60.32.77
+218.65.177.15
+220.170.181.136
+220.194.215.143
+221.13.157.138
+221.180.139.195
+221.195.4.26
+221.204.210.203
+222.161.223.148
+222.175.136.91
+222.186.137.228
+222.222.207.140
+223.111.12.58
+223.99.236.180
+39.130.133.34
+42.202.143.195
+42.236.123.142
+42.247.12.197
+58.211.21.41
+58.218.206.10
+58.222.16.23
+58.252.187.172
+58.51.95.181
+59.46.7.41
+59.53.70.198
+60.12.124.141
+60.221.222.10
+61.156.196.70
+61.164.246.21
+61.184.203.23
+61.190.149.200
+65.153.158.131
+65.153.158.196
+65.153.196.131
+
+# TAG: ksyunacc.com
+120.131.7.211
+120.131.7.212
+120.92.128.233
+120.92.128.234
+# ksyuncdn.com
+120.131.7.209
+120.92.128.236
+58.220.38.189
+153.99.244.189
+
+##### web sites #####
+# TAG: alibaba-taobao
+ns1.taobao.com
+ns2.taobao.com
+ns3.taobao.com
+ns4.taobao.com
+ns5.taobao.com
+ns6.taobao.com
+ns7.taobao.com
+gslbns1.taobao.com
+gslbns2.taobao.com
+gslbns3.taobao.com
+splitns1.taobao.com
+splitns2.taobao.com
+splitns3.taobao.com
+danuoyins1.tbcache.com	# img01.taobao.com
+danuoyins2.tbcache.com
+danuoyins3.tbcache.com
+danuoyins4.tbcache.com.
+danuoyins5.tbcache.com.
+danuoyins8.tbcache.com.
+danuoyins9.tbcache.com.
+danuoyins6.tbcache.com.
+danuoyins7.tbcache.com.
+danuoyinewns1.gds.alicdn.com
+danuoyinewns2.gds.alicdn.com
+danuoyinewns3.gds.alicdn.com
+danuoyinewns4.gds.alicdn.com
+ns1.alikunlun.com
+ns2.alikunlun.com
+ns3.alikunlun.com
+ns4.alikunlun.com
+ns5.alikunlun.com
+ns1.alikunlun.net
+ns2.alikunlun.net
+ns3.alikunlun.net
+ns4.alikunlun.net
+# ns1.alipaydns.com
+# ns2.alipaydns.com
+ns3.alipaydns.com
+ns4.alipaydns.com
+# ns5.alipaydns.com	# 2012-10-26 14:32:19 = NXDOMAIN
+# ns6.alipaydns.com	# 2012-10-26 14:32:39 = NXDOMAIN
+ns1.alipay.com
+ns2.alipay.com
+ns3.alipay.com
+ns4.alipay.com
+ns1.aliyun.com
+ns2.aliyun.com
+ns3.aliyun.com
+ns4.aliyun.com
+ns5.aliyun.com
+ns1.alisoft.com
+ns2.alisoft.com
+# Same DNSs
+# ns1.alisoft.com => gdns1.aliyun.com
+# ns2.alisoft.com => gdns2.aliyun.com
+gdns1.aliyun.com
+gdns2.aliyun.com
+ns1.aliedge.com
+ns2.aliedge.com
+ns3.aliedge.com
+ns4.aliedge.com
+gdsns1.alibabadns.com
+gdsns2.alibabadns.com
+cgsdns1.alibabaonline.com
+cgsdns2.alibabaonline.com
+ns8.alibabaonline.com
+nshz.alibabaonline.com
+nsp.alibabaonline.com
+205.204.114.1	# nsp.alibabaonline.com 2001:470:20::2 才能解析到此地址
+nsp2.alibabaonline.com
+205.204.114.2	# nsp2.alibabaonline.com 2001:470:20::2 才能解析到此地址
+tpdns1.alibabaonline.com
+tpdns2.alibabaonline.com
+tpdns3.alibabaonline.com
+tpdns4.alibabaonline.com
+ns1.koubei.com
+ns2.koubei.com
+ns3.koubei.com
+ns4.koubei.com
+ns1.alimama.com
+ns2.alimama.com
+nscm2.alimama.com
+nscm3.alimama.com
+nscm4.alimama.com
+# hichinacdn.net 权威NS是ns[4-7].taobao.com, 可能是淘宝旗下的
+ans1.hichinacdn.net
+ans2.hichinacdn.net
+ans3.hichinacdn.net
+gslbns1.hichinacdn.net
+gslbns2.hichinacdn.net
+gslbns3.hichinacdn.net
+# for cnspeedtest.cn
+dns31.hichina.com
+dns32.hichina.com
+# in aliyun, bilibili.tv
+ns1.hdslb.net
+ns2.hdslb.net
+ns3.hdslb.net
+
+# TAG: CDNZZ
+123.150.204.133
+183.61.242.57
+61.139.175.254
+123.134.94.180
+163.177.173.4
+112.25.55.97
+117.172.6.130
+192.240.126.66
+50.7.150.18
+119.81.197.194
+
+# TAG: alibaba-AS 37963
+42.96.128.0/17
+42.120.0.0/15
+42.156.128.0/17
+110.75.0.0/16
+110.76.0.0/19
+110.76.32.0/20
+110.173.192.0/19
+112.124.0.0/16
+112.127.0.0/16
+114.215.0.0/16
+115.28.0.0/15
+115.124.16.0/22
+119.38.216.0/21
+119.42.224.0/20
+119.42.242.0/23
+119.42.244.0/22
+121.0.16.0/20
+121.196.0.0/14
+140.205.0.0/16
+203.209.250.0/23
+218.244.128.0/19
+223.4.0.0/14
+
+# TAG: 360safe
+ns1.qhcdn.com
+ns2.qhcdn.com
+ns3.qhcdn.com
+ns4.qhcdn.com
+ns5.qhcdn.com
+ns6.qhcdn.com
+ns7.qhcdn.com
+ns8.qhcdn.com
+dns1.360safe.com
+dns2.360safe.com
+dns3.360safe.com
+dns4.360safe.com
+dns5.360safe.com
+dns6.360safe.com
+dns7.360safe.com
+dns8.360safe.com
+dns9.360safe.com
+ns4.qhcdn.com
+ns5.qhcdn.com
+ns4.lbs.keniub.com
+ns5.lbs.keniub.com
+
+# TAG: cdnudns
+ns1.cdnudns.com
+ns2.cdnudns.com
+ns3.cdnudns.com
+ns4.cdnudns.com
+
+# TAG: 7k7k.com, TestBy flash.7k7k.com
+ns1.dnsv5.com
+ns2.dnsv5.com
+ns3.dnsv5.com
+ns4.dnsv5.com
+
+# TAG: bitautotech, 易车网
+ns.bitautotech.com
+ns5.bitautotech.com
+ns8.bitautotech.com
+ns7.bitautotech.com
+
+# TAG: verycdn
+183.60.42.126
+220.170.193.203
+218.205.72.133
+121.9.213.152
+58.51.95.122
+58.253.211.37
+59.151.30.18
+59.45.79.34
+111.13.125.151
+112.21.182.4
+112.65.227.196
+124.128.20.102
+222.140.154.137
+221.204.173.206
+183.203.21.76
+58.215.241.24
+183.232.66.233
+220.167.100.213
+211.151.81.135
+123.129.249.141
+ns1.veryns.com
+ns3.veryns.com
+ns4.veryns.com
+ns7.veryns.com
+ns8.veryns.com
+ns1.ugametool.com
+ns2.ugametool.com
+
+# TAG: baidu
+dns.baidu.com
+ns2.baidu.com
+ns3.baidu.com
+ns4.baidu.com
+ns7.baidu.com
+ns1.a.shifen.com
+ns2.a.shifen.com
+ns3.a.shifen.com
+ns4.a.shifen.com
+ns5.a.shifen.com
+ns1.n.shifen.com
+ns2.n.shifen.com
+ns3.n.shifen.com
+ns4.n.shifen.com
+ns5.n.shifen.com
+
+# TAG: baidu-AS 38365
+119.75.208.0/20
+180.76.16.0/21
+
+# TAG: CCTV-AS 55957
+202.108.2.128/25
+202.108.8.0/23
+202.108.16.0/23
+202.108.36.128/25
+202.108.39.0/24
+
+# TAG: cntv
+gtm01.cctvcdn.net
+gtm02.cctvcdn.net
+gtm03.cctvcdn.net
+
+# TAG: dnspod
+a.dnspod.com
+b.dnspod.com
+c.dnspod.com
+f1g1ns1.dnspod.net
+f1g1ns2.dnspod.net
+# f1g1ns3.dnspod.net
+# f1g1ns4.dnspod.net
+f1g2ns1.dnspod.net
+f2g1ns1.dnspod.net
+f2y1dns1.dnspod.net
+f2y1dns2.dnspod.net
+namerich1.dnspod.net
+namerich2.dnspod.net
+ns1.dnspod.com
+ns2.dnspod.com
+ns3.dnspod.com
+ns4.dnspod.com
+ns1.dnspod.net
+ns2.dnspod.net
+ns3.dnspod.net
+ns4.dnspod.net
+ns5.dnspod.net
+ns6.dnspod.net
+# for 51vv.com
+ns1.dnsv2.com
+ns2.dnsv2.com
+ns1.dnsv3.com
+ns2.dnsv3.com
+ns1.dnsv4.com
+ns2.dnsv4.com
+ns1.dnsv5.com
+ns2.dnsv5.com
+ns3.dnsv2.com
+ns4.dnsv2.com
+ns3.dnsv3.com
+ns4.dnsv3.com
+ns3.dnsv4.com
+ns4.dnsv4.com
+ns3.dnsv5.com
+ns4.dnsv5.com
+182.140.167.128/25
+125.39.213.128/25
+115.236.151.128/25
+183.60.57.128/25
+180.153.10.128/25
+ns1.mydnspod.com
+ns2.mydnspod.com
+
+# TAG: dopool.com, doplive.com
+ns1.doplive.cn
+ns2.doplive.cn
+ns1.doplive.com
+ns2.doplive.com
+
+# TAG: hao123
+ns1.jomodns.com
+ns2.jomodns.com
+ns3.jomodns.com
+ns4.jomodns.com
+ns5.jomodns.com
+ns6.jomodns.com
+ns7.jomodns.com
+
+# TAG: imgo.tv
+htns1.hifly.mobi
+htns2.hifly.mobi
+
+# TAG: iqiyi.com
+ns1.iqiyi.com
+ns2.iqiyi.com
+ns3.iqiyi.com
+ns4.iqiyi.com
+ns5.iqiyi.com
+ns6.iqiyi.com
+202.108.14.0/24
+220.181.74.0/24
+
+# TAG: jd.com
+ns1.jd.com
+ns2.jd.com
+ns3.jd.com
+ns4.jd.com
+ns1.jdcache.com
+ns2.jdcache.com
+ns3.jdcache.com
+ns4.jdcache.com
+ns.jdemall.com
+ns1.jdemall.com
+122.192.30.211
+
+# TAG: kugou.com
+ns.kugou.net
+ns1.kugou.net
+ns2.kugou.net
+ns3.kugou.net
+ns4.kugou.net
+ns5.kugou.net
+ns6.kugou.net
+ns7.kugou.net
+ns8.kugou.net
+ns9.kugou.net
+ns10.kugou.net
+
+ TAG: kuwo.cn
+ns1.koowo.com
+ns2.koowo.com
+ns3.koowo.com
+ns4.koowo.com
+
+# TAG: gitv.tv
+ns1.ptqy.gitv.tv
+ns2.ptqy.gitv.tv
+ns3.ptqy.gitv.tv
+ns4.ptqy.gitv.tv
+ns1.c002.ottcn.com
+ns2.c002.ottcn.com
+ns3.c002.ottcn.com
+ns4.c002.ottcn.com
+ns1.ppstream.com
+ns2.ppstream.com
+ns3.ppstream.com
+ns4.ppstream.com
+106.38.235.227
+106.38.235.228
+61.135.177.195
+61.135.177.196 
+
+# TAG: ShiJieYunTian
+60.28.235.110
+
+# TAG: yygslb.com
+ns1.yygslb.com
+ns2.yygslb.com
+ns3.yygslb.com
+ns4.yygslb.com
+ns5.yygslb.com
+ns6.yygslb.com
+ns1.tbgslb.com
+ns2.tbgslb.com
+ns3.tbgslb.com
+ns4.tbgslb.com
+
+# TAG: scsdns.com
+ns1.scsdns.com
+ns2.scsdns.com
+ns4.scsdns.com
+ns6.scsdns.com
+
+# TAG: letv
+ns1.leletv.com		# 123.126.33.193
+ns2.leletv.com		# 60.28.199.199
+ns3.leletv.com		# 220.181.153.119
+ns4.leletv.com
+ns5.leletv.com
+ns6.leletv.com
+ns7.letvcdn.com
+ns8.letvcdn.com
+ns1.letvcloud.com
+ns2.letvcloud.com
+ns1.letvgslb.com
+ns2.letvgslb.com
+ns7.letvimg.com
+ns8.letvimg.com
+ns1.letvstore.com
+ns2.letvstore.com
+120.52.40.98	
+14.152.52.77	
+124.95.176.54	
+183.131.24.19	
+222.184.96.46	
+123.138.84.137	
+182.118.127.41	
+120.52.40.97	
+106.38.226.73	
+106.38.226.74	
+111.206.210.90	
+111.206.210.91	
+107.155.49.64	
+65.255.32.176	
+107.155.56.64
+# forward letvgslb.com to following 2 DNSs
+123.125.89.132
+220.181.117.92
+
+# TAG: pconline
+ns.pc.com.cn
+ns2.pc.com.cn
+
+# TAG: qingcdn
+# v6.pstatp.com
+125.39.7.140
+218.92.225.204
+14.215.106.4
+222.133.239.200
+114.114.116.138
+1.193.152.70
+14.18.201.81
+23.248.160.251
+36.248.9.18
+42.202.143.73
+42.247.12.197
+58.218.206.10
+58.222.16.23
+58.252.187.174
+58.51.95.181
+59.46.7.41
+59.53.70.198
+59.56.18.209
+60.221.222.10
+61.136.118.107
+61.156.196.70
+61.190.149.196
+106.38.238.57
+107.155.29.130
+110.53.182.78
+111.1.61.178
+111.12.13.162
+111.23.12.40
+111.40.216.74
+111.47.198.137
+111.62.5.13
+111.7.175.135
+112.25.85.9
+112.253.2.211
+112.29.134.75
+112.5.61.115
+113.207.31.208
+113.207.37.131
+113.229.252.20
+113.6.235.243
+113.6.248.75
+114.54.2.138
+114.80.216.202
+115.231.223.11
+116.114.17.101
+116.55.253.141
+117.131.199.67
+117.135.199.242
+117.139.22.76
+117.169.17.205
+117.23.1.17
+117.23.59.51
+118.123.12.205
+119.254.210.112
+119.84.53.202
+120.41.38.70
+122.188.107.12
+122.70.129.50
+123.132.254.201
+123.138.255.132
+123.159.203.10
+123.159.203.7
+123.59.102.18
+124.126.250.69
+124.14.10.99
+124.239.189.8
+125.39.59.20
+125.64.98.17
+125.90.58.142
+139.209.92.72
+150.138.141.86
+153.36.201.18
+161.202.38.26
+163.177.115.100
+171.15.197.95
+182.118.9.2
+183.131.160.178
+183.131.64.216
+183.2.219.210
+183.203.28.121
+183.232.237.3
+183.61.63.115
+218.60.32.77
+218.61.21.202
+218.65.177.15
+218.92.225.201
+220.170.181.136
+220.194.215.143
+221.180.136.198
+221.204.210.203
+222.161.223.148
+222.175.136.91
+222.186.137.228
+222.222.192.70
+223.99.236.180
+
+# TAG: pptv_or_pplive
+dns1.pplive.com
+dns5.pplive.com
+dns6.pplive.com
+dns11.pplive.com
+dns12.pplive.com
+ns1.myxns.com.cn
+ns2.myxns.com.cn
+ns3.myxns.com.cn
+ns4.myxns.com.cn
+lv4ns1.ffdns.net
+lv4ns2.ffdns.net
+lv4ns3.ffdns.net
+lv4ns4.ffdns.net
+
+# TAG: ruijiang-AS 38372
+# FoShan RuiJiang Science and Tech Ltd.
+58.249.115.0/24
+112.90.48.0/23
+112.90.50.0/24
+112.90.52.0/24
+112.90.55.0/24
+112.90.60.0/23
+112.90.177.0/24
+112.90.178.0/23
+112.90.180.0/23
+113.105.223.0/24
+113.106.17.0/24
+113.107.201.0/24
+113.107.232.0/23
+113.107.234.0/24
+116.28.63.0/24
+116.28.64.0/23
+119.120.92.0/24
+119.145.147.0/24
+119.145.254.0/24
+121.9.215.0/24
+121.9.235.0/24
+121.9.243.0/24
+121.9.249.0/24
+121.10.246.0/23
+121.201.0.0/17
+122.13.176.0/23
+125.90.192.0/23
+125.90.194.0/24
+125.90.196.0/23
+163.177.161.0/24
+163.177.179.0/24
+163.177.180.0/23
+163.177.182.0/24
+183.60.40.0/23
+183.60.42.0/24
+183.60.44.0/24
+183.60.46.0/23
+183.61.70.0/24
+183.61.83.0/24
+
+# TAG: xunlei
+ns1.xunlei.net
+ns2.xunlei.net
+ns3.xunlei.net
+ns4.xunlei.net
+ns11.xunlei.net
+ns22.xunlei.net
+123.59.127.10
+58.254.134.151
+182.118.18.15
+58.61.39.231
+58.220.12.33
+42.51.169.114
+42.51.169.127
+120.132.88.186
+123.59.33.193
+123.59.127.74
+123.59.127.75
+123.59.127.73
+
+# TAG: sina
+# small files' routing, from ZhuoQing
+58.63.236.199
+58.63.236.210
+58.63.236.134
+61.172.201.114
+61.172.201.150
+123.125.104.88
+123.126.57.64
+123.126.42.241
+123.126.57.122
+114.80.223.13
+ns1.sina.com
+ns2.sina.com
+ns3.sina.com
+ns4.sina.com
+ns1.sina.com.cn
+ns2.sina.com.cn
+ns3.sina.com.cn
+ns4.sina.com.cn
+ns3.kunlunle.com
+ns4.kunlunle.com
+ns5.kunlunle.com
+ns3.alikunlun.net
+ns4.alikunlun.net
+ns5.alikunlun.net
+ns3.kunlunpi.com
+ns4.kunlunpi.com
+ns5.kunlunpi.com
+ns3.kunlunno.com
+ns4.kunlunno.com
+ns5.kunlunno.com
+ns3.kunlunea.com
+ns4.kunlunea.com
+ns5.kunlunea.com
+ns1.sinaedge.com
+ns2.sinaedge.com
+ns3.sinaedge.com
+ns4.sinaedge.com
+ns5.sinaedge.com
+ns4.kunlunca.com
+
+# TAG: sohu, to BJ-DXT 118.244.253.0/25
+# domains is here:
+# 17173.com
+# chinaren.com
+# focus.cn
+# go2map.com
+# itc.cn
+# sohu.com
+# sogou.com
+# sohu.com.cn
+# sohu.net
+# sohu.org
+# ad-plus.cn
+ns.sohu.cm
+dns.sohu.com
+ns1.sohu.com
+ns2.sohu.com
+ns3.sohu.com
+ns4.sohu.com
+ns5.sohu.com
+ns6.sohu.com
+ns7.sohu.com
+ns8.sohu.com
+ns1.sogou.com
+ns2.sogou.com
+ns1.sohu-inc.com
+ns2.sohu-inc.com
+dns.sohu-inc.com
+dns1.sohu-inc.com
+ns1.sohucs.com
+ns2.sohucs.com
+ns3.sohucs.com
+ns4.sohucs.com
+ns5.sohucs.com
+ns6.sohucs.com
+ns7.sohucs.com
+ns8.sohucs.com
+ns1.sohuns.com
+ns2.sohuns.com
+w.a.sohu.com
+s.a.sohu.com
+k.a.sohu.com
+v.a.sohu.com
+x.a.sohu.com
+y.a.sohu.com
+z.a.sohu.com
+ns1.e.sohu.com
+ns2.e.sohu.com
+
+# TAG: tencent
+ns-os1.qq.com
+ns-cmn1.qq.com
+ns-cdn1.qq.com
+ns-cdn2.qq.com
+ns-edu1.qq.com
+ns-edu2.qq.com
+ns-cnc1.qq.com
+ns-cnc2.qq.com
+ns-tel1.qq.com
+ns-tel2.qq.com
+ns1.qq.com
+ns2.qq.com
+ns3.qq.com
+ns4.qq.com
+60.28.1.75	# ns4.qq.com 2001:470:20::2 才能解析到此地址
+ns-open1.qq.com
+ns-open2.qq.com
+ns-open3.qq.com
+ns114.qq.com
+119.29.29.0/24
+119.28.28.0/24
+
+# TAG: tencent-AS 45090
+# show route receive-protocol bgp 182.254.15.253
+# show route receive-protocol bgp 220.112.88.133
+182.254.0.0/16
+203.195.128.0/17
+203.205.128.0/17
+
+# TAG: tudou
+ns1.tudoudns.com
+ns2.tudoudns.com
+ns3.tudoudns.com
+ns4.tudoudns.com
+
+# TAG: shijieyuntian
+dns1.vdndc.com
+dns2.vdndc.com
+dns3.vdndc.com
+dns4.vdndc.com
+dns5.vdndc.com
+dns6.vdndc.com
+
+# TAG: youku
+ns1.youku.com
+ns2.youku.com
+ns3.youku.com
+ns4.youku.com
+
+# TAG: DouYu
+119.90.48.99
+119.90.48.98
+124.14.7.243
+
+##### IP address routes #####
+# TAG: AS-9819
+1.93.0.0/16
+14.103.0.0/16
+14.130.0.0/15
+14.196.0.0/15
+27.106.128.0/18
+36.248.244.0/23
+42.196.0.0/14
+49.210.0.0/15
+49.220.0.0/14
+58.22.135.0/24
+58.22.151.0/24
+58.67.136.0/23
+58.67.140.0/22
+58.67.144.0/21
+58.67.152.0/22
+58.251.146.0/23
+58.253.87.128/27
+58.253.87.160/27
+58.253.87.224/27
+58.253.94.128/26
+58.253.94.192/26
+59.111.16.0/22
+59.111.20.0/24
+60.194.0.0/15
+60.206.0.0/15
+60.253.128.0/17
+61.4.82.0/23
+61.55.190.0/25
+72.52.151.72/29
+72.52.151.128/25
+101.38.0.0/15
+101.40.0.0/15
+101.44.0.0/14
+101.104.0.0/14
+101.126.0.0/16
+101.130.0.0/15
+101.232.0.0/16
+101.244.0.0/14
+103.23.56.0/22
+103.230.56.0/22
+110.249.166.128/26
+112.90.89.0/24
+112.90.219.128/25
+112.90.222.0/25
+112.91.91.0/24
+112.91.92.0/24
+112.91.94.0/24
+112.95.136.0/23
+113.44.0.0/14
+113.57.135.32/28
+114.66.4.160/28
+114.66.195.0/24
+114.112.37.128/25
+114.112.192.0/21
+114.112.194.0/28
+114.112.200.0/27
+114.112.200.64/27
+114.112.200.128/27
+114.112.202.0/24
+114.112.220.0/22
+115.47.0.0/16
+115.172.0.0/14
+115.181.128.0/26
+115.182.0.0/15
+115.190.0.0/15
+116.204.64.0/18
+116.205.0.0/17
+116.205.128.0/18
+116.218.0.0/19
+116.218.128.0/18
+116.242.0.0/15
+117.75.0.0/17
+118.28.0.0/15
+118.144.0.0/16
+118.145.0.0/19
+118.147.0.0/16
+118.186.194.0/23
+118.186.198.0/23
+118.186.245.192/26
+118.192.32.0/21
+118.195.65.0/24
+118.195.66.0/24
+118.195.128.0/21
+118.196.0.0/14
+118.205.128.0/17
+118.206.0.0/15
+118.228.148.0/23
+118.244.0.0/16
+118.246.0.0/15
+119.6.72.0/23
+119.57.28.0/24
+119.59.128.0/17
+119.78.0.0/23
+119.79.0.0/16
+119.97.178.32/28
+119.97.178.56/29
+119.97.183.128/25
+120.64.244.0/24
+120.65.32.0/19
+120.65.88.0/21
+120.87.39.0/24
+121.37.24.0/21
+121.37.32.0/21
+121.41.240.0/21
+121.68.0.0/15
+121.251.53.0/24
+122.49.0.0/18
+123.98.0.0/16
+123.138.38.0/24
+123.139.156.224/28
+123.147.250.128/25
+123.147.251.128/25
+123.196.112.0/20
+123.197.128.0/17
+124.14.0.0/15
+124.16.76.0/22
+124.16.84.0/22
+124.16.88.0/22
+124.16.96.0/23
+124.16.128.192/26
+124.16.248.0/22
+124.16.252.0/22
+124.17.34.0/23
+124.42.128.0/18
+124.172.168.0/22
+124.172.172.0/24
+124.172.174.0/23
+124.172.176.0/24
+124.172.177.0/24
+124.174.0.0/15
+124.192.0.0/15
+124.200.0.0/15
+124.202.0.0/16
+124.203.128.0/17
+124.204.0.0/14
+124.243.212.0/22
+124.254.0.0/18
+125.39.34.0/23
+125.39.66.128/27
+125.39.66.160/28
+125.39.68.64/26
+125.39.68.128/27
+125.39.68.176/28
+125.39.68.192/27
+125.39.68.224/28
+125.39.143.32/28
+159.226.110.0/23
+159.226.112.0/24
+159.226.115.0/24
+159.226.117.0/25
+159.226.165.0/24
+168.160.249.0/24
+168.160.250.0/23
+168.160.254.0/24
+175.188.0.0/14
+180.86.0.0/16
+180.88.0.0/14
+182.50.0.0/22
+182.242.192.0/19
+198.76.196.0/24
+202.4.252.0/22
+202.14.235.0/24
+202.14.236.0/23
+202.14.238.0/24
+202.38.152.0/23
+202.91.128.0/22
+202.99.0.0/23
+202.99.58.0/24
+202.106.102.192/27
+202.106.160.0/21
+202.130.0.0/19
+203.26.161.0/24
+203.86.24.0/21
+203.88.216.0/23
+203.158.16.0/21
+203.207.64.0/19
+203.207.112.0/20
+203.207.128.0/18
+203.207.192.0/21
+203.207.208.0/20
+203.207.224.0/19
+206.219.44.0/23
+206.219.52.0/23
+210.51.168.128/28
+210.72.26.0/23
+210.73.0.0/20
+210.74.0.0/19
+210.74.188.0/22
+210.75.96.0/19
+210.76.96.0/19
+210.76.192.0/22
+210.76.197.0/24
+210.76.198.0/23
+210.76.202.0/24
+210.76.206.0/23
+210.76.208.0/23
+210.76.210.0/24
+210.76.212.0/22
+210.76.216.0/22
+210.77.2.0/23
+210.77.4.0/22
+210.77.8.0/21
+210.77.22.0/23
+210.77.24.0/22
+210.77.31.0/24
+210.78.32.0/20
+210.79.64.0/18
+211.100.224.0/19
+211.101.0.0/18
+211.103.128.0/17
+211.147.0.0/19
+211.148.64.0/18
+211.149.32.0/19
+211.149.64.0/19
+211.154.160.0/20
+211.155.128.0/19
+211.155.240.0/20
+211.161.0.0/16
+211.162.0.0/16
+211.167.224.0/19
+218.5.96.0/23
+218.241.0.0/19
+218.241.128.0/17
+218.244.224.0/19
+218.247.0.0/19
+218.247.128.0/17
+218.249.0.0/16
+219.234.0.0/21
+219.234.80.0/20
+219.234.128.0/17
+219.238.0.0/15
+220.112.0.0/14
+220.152.128.0/17
+220.181.42.224/27
+220.231.128.0/20
+223.20.0.0/15
+223.192.0.0/16
+223.208.0.0/14
+223.255.0.0/17
+
+# TAG: other addresses
+211.161.192.0/18
+10.0.0.0/8
+172.16.0.0/12
+192.168.0.0/16
+211.161.159.0/24	# Wuhan
+211.162.62.0/24		# GuangZhou, cutv
+211.162.78.1		# ShenZhen
+211.162.79.1		# ShenZhen
+# BeiJing DNS
+123.151.133.161
+123.151.133.162
+124.207.160.106
+124.207.236.26
+124.207.241.236
+211.167.230.0/24
+211.167.240.242
+211.167.241.236
+# Ajkdns
+180.153.87.55
+115.159.231.156
+114.80.230.214
+58.247.138.69
+115.159.231.157
+115.159.231.151
+
+# TAG: sjhl, 世纪互联
+# 世纪互联AS: 9308 9802 17428
+58.83.128.0/17
+59.151.0.0/17
+60.28.192.0/19
+60.29.240.0/20
+120.135.16.0/20
+120.135.32.0/19
+120.135.64.0/18
+125.39.24.0/22
+125.39.92.0/22
+125.39.164.0/22
+125.39.188.0/22
+125.39.192.0/22
+125.39.216.0/22
+125.39.220.0/22
+125.39.232.0/22
+203.196.0.0/22
+203.196.4.0/24
+210.77.128.0/18
+211.99.160.0/21
+211.99.168.0/22
+211.99.178.0/24
+211.99.183.0/24
+211.99.188.0/22
+211.99.192.0/19
+211.151.0.0/16
+211.152.0.0/19
+211.152.96.0/19
+
+# TAG: OTHERS
+ns1.qingcdn.com
+ns2.qingcdn.com
+ns3.qingcdn.com
+123.134.184.141
+ns1.ialloc.com
+ns2.ialloc.com
+dns1.ourdvs.org
+dns2.ourdvs.info
+dns3.ourdvs.org
+dns4.ourdvs.info
+dns5.ourdvs.org
+dns1.ourwebcdn.org
+dns2.ourwebcdn.info
+dns3.ourwebcdn.org
+dns4.ourwebcdn.info
+dns5.ourwebcdn.org
+ns1.ourwebpic.info
+ns2.ourwebpic.info
+ns3.ourwebpic.info
+ns4.ourwebpic.info
+ns5.ourwebpic.info
+dns1.ourwebpic.info
+dns2.ourwebpic.info
+dns3.ourwebpic.info
+dns4.ourwebpic.info
+dns5.ourwebpic.info
+ns3.kunlungr.com
+ns4.kunlungr.com
+ns5.kunlungr.com
+ns1.mmycdn.com
+ns2.mmycdn.com
+ns3.mmycdn.com
+ns6.qh-lb.com
+ns5.qh-lb.com
+ns4.qh-lb.com
+ns3.qh-lb.com
+ns2.qh-lb.com
+119.188.67.105
+220.181.126.35
+123.125.80.86
+220.181.159.184
+42.51.169.137
+
+# TAG: NEWIPS
+dns2.ourdvs.info
+dns4.ourdvs.info
+114.80.230.197
+157.0.164.12
+119.188.4.14.53
+219.141.140.10
+ns1-live.00cdn.com
+ns2-live.00cdn.com
+ns3-live.00cdn.com
+ns4-live.00cdn.com
+dns1.ourdvs.org
+dns2.ourdvs.org
+dns3.ourdvs.org
+dns4.ourdvs.org
+dns5.ourdvs.org
+ns1.vcloudgtm.com
+ns2.vcloudgtm.com
+124.251.21.94
+221.130.200.169
+223.111.17.109
+183.134.55.10
+116.211.125.79
+42.236.41.9
+219.141.136.10
+180.153.199.214
+111.161.99.130
+219.141.140.10
+117.149.37.143
+117.149.37.144
+27.221.106.6
+27.221.106.1
+27.221.106.5
+49.79.232.213
+14.119.124.110
+14.119.124.91
+221.236.174.81
+218.92.152.169
+14.29.41.26
+61.164.244.213
+111.161.65.233
+118.192.132.79 
+58.211.21.41
+42.236.123.142
+221.13.157.138
+123.134.184.140
+
+"
+
+arping_check() {
+	# skip check while testing
+	case $MY_GW in
+		$GW_test) return 0
+	esac
+	# start detect
+	if arping -I $NIC -c 1 -q $MY_GW; then
+		true
+	else
+		echo_red "arping $MY_GW failed, exit now"
+		exit 2
+	fi
+}
+
+# Color define
+OFF=$'\e[0m'
+CYAN_BOLD=$'\033[1;36m'
+GREEN_BOLD=$'\e[1;32m'
+MAGENTA_BOLD=$'\033[1;35m'
+RED_BOLD=$'\e[1;31m'
+YELLOW_BOLD=$'\e[1;33m'
+OFF=$'\e[0m'
+echo_ok_end() {
+	echo -e "${GREEN_BOLD}ok${OFF}"
+}
+echo_fail_end() {
+	echo -e "${RED_BOLD}failed${OFF}"
+}
+echo_green() {
+	echo -e "${GREEN_BOLD}$@${OFF}"
+}
+echo_red() {
+	echo -e "${RED_BOLD}$@${OFF}"
+}
+echo_yellow() {
+	echo -e "${YELLOW_BOLD}$@${OFF}"
+}
+echo_already_did() {
+	if [ x$echo_already_did_opts == "x-v" ]; then
+		echo -ne "${YELLOW_BOLD}already did${OFF}\r\e[K\e[0m"
+	else
+		echo_yellow "already did"
+	fi
+}
+
+log() {
+	[[ $LOG ]] || LOG=$( realpath $0.log )
+	echo "`date +%F\ %T` $@" >> $LOG
+}
+
+manual() {
+	if [ $MANUAL_MODE -eq 1 ]; then
+		return 0
+	elif [ $MANUAL_MODE -eq 0 ]; then
+		return 1
+	else
+		echo_yellow "Invalid MANUAL_MODE value: $MANUAL_MODE"
+	fi
+}
+
+resolvename() {
+	[[ $1 ]] && local NAME=$1
+	local R=`dig @"$MYDNS" +short +time=2 $NAME 2>/dev/null | sort`
+	if grep -q ';; connection timed out; no servers could be reached' <<< "$R"; then
+		return 1
+	else
+		echo -n "$R"
+		return 0
+	fi
+}
+
+yes_or_no() {
+	while read ANSWER; do
+		case $ANSWER in
+			[yY][eE][sS])
+				return 0;;
+			[nN][oO])
+				return 1;;
+			quit)
+				exit 1;;
+			*)
+				echo -n "I don't understand, (yes/no/quit) "
+				continue
+		esac
+	done
+	return 0
+}
+
+print_help() {
+	echo "Usage: $0 [-v] {add|del|check|clean} {TAG|all}"
+	echo "In Gentoo, I can start/stop automatically while named with .start/.stop appended. eg: ${0}.start"
+	echo "TAG is partial matched and case sensitive, available TAGs are:"
+	grep ^"# TAG:" <<< "$ADDRESS_LIST_ALL" | sed -e 's/^# TAG:/ /' -e '/^#/d'
+	exit 1
+}
+
+get_my_ip() {
+	ip -4 addr show dev $NIC | \
+		awk '/^    inet / && ( \
+			/'$IP_dns1'\// || \
+			/'$IP_dns2'\// || \
+			/'$IP_dns3'\// || \
+			/'$IP_dns4'\// || \
+			/'$IP_dns5'\// || \
+			/'$IP_dns6'\// || \
+			/'$IP_dns7'\// || \
+			/'$IP_dns8'\// || \
+			/'$IP_ns1'\// || \
+			/'$IP_ns2'\// || \
+			/'$IP_ns5'\// || \
+			/'$IP_ns6'\// || \
+			/'$IP_ns7'\// || \
+			/'$IP_ns8'\// || \
+			/'$IP_yd1'\// || \
+			/'$IP_yd2'\// || \
+			/'$IP_yd3'\// || \
+			/'$IP_yd4'\// || \
+			/'$IP_re1'\// || \
+			/'$IP_re2'\// || \
+			/'$IP_re3'\// || \
+			/'$IP_re4'\// || \
+			/'$IP_test'\// \
+			) {print $2}' | \
+		sed -e 's/\/..$//'
+}
+
+is_ip_address() {
+	[[ $1 ]] || return 2
+
+	case $1 in
+		[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*)
+			return 0;;
+		*)
+			return 1
+	esac
+}
+
+is_legal_line() {
+	# Abtain variables from parent: dst_addr trash1
+	# Don't accept empty line
+	[[ $dst_addr ]] || return 1
+
+	# Show TAG
+	case $trash1 in
+		TAG:*)
+			# Don't print TAG while 'clean'.
+			if [ x$ACTION == xclean ]; then
+				true
+			else
+				manual && echo -e "\n${CYAN_BOLD}${trash1}${OFF}"
+				return 1
+			fi
+			;;
+	esac
+
+	# Don't accept comment line
+	case $dst_addr in
+		"#"*) return 1;;
+		*\.*) return 0
+	esac
+}
+
+in_routing_table() {
+	local dst_ip=$1
+	if ip route list | grep -q ^"$dst_ip via $MY_GW "; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+_ip_route_() {
+	local dst_ip=$1
+	if [[ $2 ]] && [ x"$2" == "xIS_IP_FLAG" ]; then
+		local EXTRA_MSG=
+	else
+		local EXTRA_MSG="=> $dst_ip "
+	fi
+
+	manual && echo -n "${ACTION}ing: ${dst_addr} ${EXTRA_MSG:+$EXTRA_MSG}"
+
+	# Filter out NXDOMAIN pointed IP
+	if grep -q ^"$dst_ip"$ <<< "$NXIP"; then
+		echo_red "bad IP, NXDOMAIN redirected"
+		return 1
+	fi
+
+	case $ACTION in
+		add)
+			in_routing_table $dst_ip && {
+				manual && echo_already_did
+				return 0
+			}
+			;;
+		del)
+			in_routing_table $dst_ip || {
+				manual && echo_red "${RED_BOLD}not in routing table${OFF}"
+				return 1
+			}
+			;;
+		*)
+			echo_red "not supported ACTION: ${ACTION}"
+			return 1
+	esac
+
+	if ip route $ACTION $dst_ip via $MY_GW dev $NIC; then
+		log "$ACTION: $dst_addr "$EXTRA_MSG
+		manual && echo_ok_end
+		return 0
+	else
+		log "$ACTION failed: $dst_addr"$EXTRA_MSG
+		manual && echo_fail_end
+		return 1
+	fi
+}
+
+change_route() {
+	if [[ $ADDRESS_LIST ]]; then
+		true
+	else
+		manual && \
+			echo_red "ADDRESS_LIST is empty, exit now." || \
+			log "ADDRESS_LIST is empty"
+		exit 127
+	fi
+
+	local dst_addr trash1
+	while read dst_addr trash1; do
+		is_legal_line && true || continue
+
+		# IP直接加, 域名先解析成IP再加
+		if is_ip_address $dst_addr; then
+			_ip_route_ $dst_addr IS_IP_FLAG
+		else
+			IPs=`resolvename $dst_addr`
+			[[ $IPs ]] || {
+				manual && echo -n "${ACTION}ing: ${dst_addr} ${EXTRA_MSG:+$EXTRA_MSG}"
+				manual && echo "${RED_BOLD}resolution failed${OFF}"
+				continue
+			}
+
+			for dst_ip in $IPs; do
+				if is_ip_address $dst_ip; then
+					_ip_route_ $dst_ip
+				else
+					manual && \
+						echo "${RED_BOLD}Invalid IP detected, maybe CNAMEed NS${OFF}: "$dst_ip || \
+						log "Invalid IP detected, maybe CNAMEed NS: $dst_ip"
+				fi
+			done
+		fi
+	done <<< "$ADDRESS_LIST"
+}
+
+# Determine my enviroment.
+case `get_my_ip` in
+	$IP_dns1) MY_IP=$IP_dns1; MY_GW=$GW_dns1;;
+	$IP_dns2) MY_IP=$IP_dns2; MY_GW=$GW_dns2;;
+	$IP_dns3) MY_IP=$IP_dns3; MY_GW=$GW_dns3;;
+	$IP_dns4) MY_IP=$IP_dns4; MY_GW=$GW_dns4;;
+	$IP_dns5) MY_IP=$IP_dns5; MY_GW=$GW_dns5;;
+	$IP_dns6) MY_IP=$IP_dns6; MY_GW=$GW_dns6;;
+	$IP_dns7) MY_IP=$IP_dns7; MY_GW=$GW_dns7;;
+	$IP_dns8) MY_IP=$IP_dns8; MY_GW=$GW_dns8;;
+	$IP_ns1) MY_IP=$IP_ns1; MY_GW=$GW_ns1;;
+	$IP_ns2) MY_IP=$IP_ns2; MY_GW=$GW_ns2;;
+	$IP_ns5) MY_IP=$IP_ns5; MY_GW=$GW_ns5;;
+	$IP_ns6) MY_IP=$IP_ns6; MY_GW=$GW_ns6;;
+	$IP_ns7) MY_IP=$IP_ns6; MY_GW=$GW_ns6;;
+	$IP_ns8) MY_IP=$IP_ns6; MY_GW=$GW_ns6;;
+	$IP_yd1) MY_IP=$IP_yd1; MY_GW=$GW_yd1;;
+	$IP_yd2) MY_IP=$IP_yd2; MY_GW=$GW_yd2;;
+	$IP_yd3) MY_IP=$IP_yd3; MY_GW=$GW_yd3;;
+	$IP_yd4) MY_IP=$IP_yd4; MY_GW=$GW_yd4;;
+	$IP_re1) MY_IP=$IP_re1; MY_GW=$GW_re1;;
+	$IP_re2) MY_IP=$IP_re2; MY_GW=$GW_re2;;
+	$IP_re3) MY_IP=$IP_re3; MY_GW=$GW_re3;;
+	$IP_re4) MY_IP=$IP_re4; MY_GW=$GW_re4;;
+	$IP_test)
+		MY_IP=$IP_test
+		MY_GW=$GW_test
+		# Mask DNS IPs I will use later in test enviroment.
+		ADDRESS_LIST_ALL="$( sed \
+			-e '/211.161.192./d' \
+			-e '/211.161./d' <<< "$ADDRESS_LIST_ALL" )"
+		;;
+	*)
+		cat <<EOF
+This script is not suitable for this server ...
+
+For testing purpose, please execute below command on your local host:
+ip addr add 1.1.1.1/30 dev $NIC
+EOF
+		exit 0
+esac
+
+# Name it with '.start|.stop' appended will lead to add/del route & exit.
+case $0 in
+	*.start)
+		ACTION="add"
+		ADDRESS_LIST="$ADDRESS_LIST_ALL"
+		LOG=$( realpath $0 ).log
+		MANUAL_MODE=0
+		change_route
+		exit 0
+		;;
+	*.stop)
+		ACTION="del"
+		ADDRESS_LIST="$ADDRESS_LIST_ALL"
+		LOG=$( realpath $0 ).log
+		MANUAL_MODE=0
+		change_route
+		exit 0
+		;;
+	*)
+		true
+esac
+
+# check arguments
+[[ $1 ]] && [[ $2 ]] || print_help
+
+# check gateway, exit if detect failed
+if which arping &>/dev/null; then
+	arping_check
+else
+	echo_red "command not found, check skipped: arping"
+fi
+
+# Determine if show "already did" message
+case $1 in
+	-v)
+		echo_already_did_opts=""
+		shift
+		;;
+	*)
+		echo_already_did_opts="-v"
+esac
+
+# Determine address-list section to operate.
+case $2 in
+	all)
+		ADDRESS_LIST="$ADDRESS_LIST_ALL"
+		;;
+	*/*)
+		# sed can not match '/' here, so baned.
+		echo_yellow "You can't use '/' in TAG name :("
+		echo
+		print_help
+		;;
+	*)
+		ADDRESS_LIST=$( sed -ne '/TAG: '$2'/,/^$/p' <<< "$ADDRESS_LIST_ALL" )
+		if [[ $ADDRESS_LIST ]]; then
+			true
+		else
+			echo "${RED_BOLD}TAG invalid${OFF}: $2"
+			echo
+			print_help
+		fi
+esac
+
+# Determine action to take.
+case $1 in
+	del)
+		ACTION="del"
+		change_route
+		;;
+	add)
+		ACTION="add"
+		change_route
+		;;
+	check)
+		ACTION="check"
+		while read dst_addr trash1; do
+			is_legal_line && true || continue
+
+			if is_ip_address $dst_addr; then
+				IS_IP_FLAG=1
+				IPs=$dst_addr
+			else
+				IS_IP_FLAG=0
+				IPs=`resolvename $dst_addr`
+			fi
+			# show failed resolution
+			if ! [[ $IPs ]]; then
+				echo -en "${YELLOW_BOLD}*${OFF} "
+				echo -n $dst_addr
+				echo_red " resolution failed"
+			fi
+
+			for dst_ip in $IPs; do
+				# check if the address in routing table
+				if in_routing_table $dst_ip; then
+					echo -en "${GREEN_BOLD}+${OFF} "
+				else
+					echo -en "${RED_BOLD}-${OFF} "
+				fi
+
+				# print message
+				if [ $IS_IP_FLAG -eq 1 ]; then
+					echo $dst_addr
+				elif [ $IS_IP_FLAG -eq 0 ]; then
+					echo "$dst_addr => "$dst_ip
+				else
+					echo_red "Unexpected error detected"
+				fi
+			done
+		done <<< "$ADDRESS_LIST"
+		echo "(${GREEN_BOLD}+${OFF}) in head means this IP lives in routing table, (${RED_BOLD}-${OFF}) not in."
+		;;
+	clean)
+		ACTION="clean"
+		ADDRESS_LIST="$ADDRESS_LIST_ALL"
+		# clean by TAG is not possible now, so just clean all
+		ROUTE_TABLE=$( ip route list all )
+		strip_from_table() {
+			local dst_ip=$1
+			if [[ $dst_ip ]] && is_ip_address $dst_ip; then
+				in_routing_table $dst_ip && ROUTE_TABLE=$( grep -v ^"$dst_ip via $MY_GW " <<< "$ROUTE_TABLE" )
+			else
+				echo "${RED_BOLD}Error in $FUNCNAME while cleaning${OFF}: $dst_addr"
+			fi
+		}
+		CNT_ALL=$( echo "$ADDRESS_LIST" | wc -l )
+		CNT=1
+		while read dst_addr trash1; do
+			is_legal_line && true || continue
+
+			if is_ip_address $dst_addr; then
+				dst_ip=$dst_addr
+				strip_from_table $dst_ip
+			else
+				IPs=`resolvename $dst_addr`
+				for dst_ip in $IPs; do
+					strip_from_table $dst_ip
+				done
+			fi
+
+			# Show progress
+			echo -en "\rProcessing ($CNT/$CNT_ALL): $dst_addr\e[K\e[0m"
+			let CNT++
+		done <<< "$ADDRESS_LIST"
+		echo -en "\r\e[K\e[0m"
+
+		# Strip routes of myself.
+		ROUTE_TABLE=$( sed -e '/^default via/d' \
+			-e '/scope host/d' \
+			-e '/dev lo $/d' \
+			-e '/scope link/d' <<< "$ROUTE_TABLE" )
+		if [[ $ROUTE_TABLE ]]; then
+			# echo "Routes to clean:"
+			echo "$ROUTE_TABLE"
+			echo -n "${YELLOW_BOLD}Routes above will be deleted, OK?${OFF} (yes/no/quit) "
+			yes_or_no || exit 0
+
+			while read R; do
+				if ip route del $R; then
+					log "$ACTION: $R"
+				else
+					log "$ACTION failed: $R"
+					echo "${RED_BOLD}fail to delete${OFF}: $R"
+				fi
+			done <<< "$ROUTE_TABLE"
+		else
+			echo_green "Great, nothing to clean :)"
+		fi
+		;;
+	*)
+		print_help
+esac

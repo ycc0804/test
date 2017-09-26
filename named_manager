@@ -1,0 +1,490 @@
+#!/bin/bash
+# bind process manager, by Drunkard Zhang <gongfan193@gmail.com>
+# Take action based on names.
+case $0 in
+	*.start)
+		RLINK=$( ls -g -o --color=no $0 | sed -e 's/^.*-> //' )
+		$RLINK start
+		exit 0
+		;;
+	*.stop)
+		RLINK=$( ls -g -o --color=no $0 | sed -e 's/^.*-> //' )
+		$RLINK stop
+		exit 0
+		;;
+	*/rndc)
+		RLINK=$( ls -g -o --color=no $0 | sed -e 's/^.*-> //' )
+		$RLINK rndc $@
+		exit 0
+		;;
+	*)
+		true
+esac
+
+GREEN_BOLD=$'\033[32;01m'
+RED=$'\033[0;31m'
+RED_BOLD=$'\033[31;01m'
+CYAN=$'\033[0;36m'
+CYAN_BOLD=$'\033[1;36m'
+OFF=$'\033[0m'
+
+# About debug
+DEBUG=${DEBUG:-0}	# 0-7, 越大信息越详细; 0为关闭;
+			# -1 用于特定点的调试
+if [ $DEBUG -eq 0 ]; then
+	OPTS=
+elif [ $DEBUG -eq 1 ]; then
+	OPTS="-g"
+elif [ $DEBUG -gt 1 ]; then
+	set -x
+	OPTS="-d $DEBUG -g"
+fi
+
+# Only for root
+if [ $EUID -ne 0 ]; then
+	echo "Only for root, exit now"
+	exit 1
+fi
+
+# Based on benchmark, AMD CPU doing more efforts than Intel's, so double
+# threads on Intel CPU.
+N_CPU=$( grep -c ^processor /proc/cpuinfo )
+if [[ $( awk '/model name/ && /Intel/ && (/CPU E5-/ || /E56[24]/)' /proc/cpuinfo ) ]]; then
+	THREADS=
+elif [[ $( awk '/model name/ && /(Intel|Pentium)/' /proc/cpuinfo ) ]]; then
+	THREADS="-n $(( $N_CPU * 2 ))"
+elif [[ $( awk '/model name/ && /AMD/' /proc/cpuinfo ) ]]; then
+	THREADS=
+else
+	THREADS=
+	echo "Unknow CPU vender, won't set more THREADS than defauts."
+fi
+
+# Determine chroot environment, chrooted root is where $0 leaves
+MY_PATH=${0%/*}
+if which readlink >/dev/null 2>&1; then
+	CHROOT=$( readlink -m $MY_PATH )
+elif which readlink >/dev/null 2>&1; then
+	CHROOT=$( realpath $MY_PATH )
+else
+	echo "WARN: cannot determine MY_PATH, which may lead to errors"
+	exit 1
+fi
+# 确定当前工作目录,检测诡异的路径问题
+if [ ! -d $CHROOT/etc ]; then
+	echo "WARN: not in chroot directory's root, which may lead to errors"
+fi
+# Determine which rndc.conf to use
+RNDC_CONF=
+if [ -e ${CHROOT}/etc/rndc.conf ]; then
+	RNDC_CONF="${CHROOT}/etc/rndc.conf"
+elif [ -e ${CHROOT}/etc/rndc.conf-$HOSTNAME ]; then
+	RNDC_CONF="${CHROOT}/etc/rndc.conf-$HOSTNAME"
+else
+	echo "No rndc.conf found"
+	exit 127
+fi
+NAMED_DEAD_TIME=9
+NAMED_CONF="/etc/named.conf"
+[ -e $CHROOT/$NAMED_CONF ] || {
+	echo "$CHROOT/$NAMED_CONF not found, exit now"
+	exit 127
+}
+NAMED_USER="named"
+NAMED="named -c $NAMED_CONF $THREADS -u $NAMED_USER -U $N_CPU -t $CHROOT${OPTS:+ ${OPTS}}"
+NAMED_PID_FILE=$( awk -F'"' '/pid-file(\t| )/ {print $2}' $CHROOT/$NAMED_CONF )
+# The file holding 'directory' option.
+DIRECTORY_SETTING=
+if [ -f $CHROOT/etc/global-common ]; then
+	DIRECTORY_SETTING="$CHROOT/etc/global-common"
+	OPTS_directory=`awk -F'"' '/directory(\t| )/ {print $2}' $DIRECTORY_SETTING`
+elif [[ `awk -F'"' '/directory(\t| )/ {print $2}' $CHROOT/$NAMED_CONF` ]]; then
+	DIRECTORY_SETTING=$CHROOT/$NAMED_CONF
+	OPTS_directory=`awk -F'"' '/directory(\t| )/ {print $2}' $DIRECTORY_SETTING`
+else
+	echo "Can not retrieve 'directory' setting, default to: /var"
+	OPTS_directory="/var"
+fi
+
+# The dir specified in 'directory' should be writable to bind
+if [[ $OPTS_directory ]]; then
+	# Generally, should check /chroot/var
+	D=$CHROOT/$OPTS_directory
+	if [ -d $D ]; then
+		[ "`stat -c %U $D`" != "$NAMED_USER" ] && \
+		echo "Directory '$D' is not writable to $NAMED_USER, this may cause fail to start."
+	else
+		echo "Directory '$D' not found, this may cause fail to start."
+	fi
+
+	# Generally, should check /chroot/var/srrdata
+	D=$CHROOT/$OPTS_directory/srrdata
+	if [ -d $D ]; then
+		[ "`stat -c %U $D`" != "$NAMED_USER" ] && \
+		echo "Directory '$D' is not writable to $NAMED_USER, this may cause slave DNS failure."
+	else
+		# echo "Directory '$D' not found, this may cause slave DNS failure."
+		true
+	fi
+	unset D
+else
+	echo "Can not retrieve 'directory' setting, didn't check directory owner."
+fi
+
+# Check that needed commands exists.
+TO_VERIFY="
+named
+named-checkconf
+rndc
+pgrep
+pkill
+kill
+"
+EC=0
+for cmd in $TO_VERIFY; do
+	which $cmd >/dev/null 2>&1 || {
+		echo -e "${RED_BOLD}$cmd${OFF} not found"
+		EC=$(( $EC + 1 ))
+	}
+done
+[ $EC -gt 0 ] && exit 1
+unset EC cmd
+
+# Functions.
+print_help() {
+	cat <<EOF
+Usage: $0 [action]
+  start			- start bind
+  stop			- stop bind by 'kill -TERM'
+  cs|clean_stop		- find & kill using pkill when NAMED_PID_FILE missed
+  restart		- stop & start bind
+  s|status		- print status by 'ps & netstat'
+  c|check		- check config file for errors
+  r|reload [zone]	- reload configuration
+  h|help		- print full help ${GREEN_BOLD}:-D${OFF}
+EOF
+
+# More verbose help info
+	case $1 in
+		--full) cat <<EOF
+
+Extended function:
+  rndc			- just a rndc wrapper
+  as|all_status		- print all bind's status on this machine
+  ak|all_kill		- kill ALL bind process could be found
+  rf|refresh zone	- Refresh zone, for slave side
+  rt|retransfer zone	- Retransfer by hand, for slave side
+  n|notify zone		- Notify slave for change, for master side
+  rs|rndc_status	- Get bind status by rndc
+  f|flush [view]	- flush cache of view
+  fn|flushname zone	- flush cache of one name, multiple is supported
+  ft|flushtree zone	- flush cache of one name and all his subdomains
+
+This program is for chroot environment only, please put all your bind
+config in chroot directory, like /chroot.
+named.conf & rndc.conf is firm location in etc/, eg: /chroot/etc/named.conf,
+will be truncated to /etc/named.conf in chrooted bind
+
+Debug: You can use traditional unix style debug by increase value of DEBUG,
+bigger value brings more verbose info, enjoy it!  eg:
+DEBUG=1 $0 start
+
+${RED_BOLD}Place this program, or it's symlink in root (/) of chroot directory !$OFF
+
+EOF
+	esac
+}
+
+pid_is_named() {
+	[[ $NAMED_PID ]] || return 1
+
+	local pid
+	local ERR_COUNT=0
+	for pid in $NAMED_PID; do
+		COMM_FILE="/proc/$pid/comm"
+		if [[ $pid ]] && [ -f $COMM_FILE ]; then
+			grep -q "named" $COMM_FILE || ERR_COUNT=$(( $ERR_COUNT + 1 ))
+		else
+			ERR_COUNT=$(( $ERR_COUNT + 1 ))
+		fi
+	done
+
+	[ $ERR_COUNT -eq 0 ] && \
+		return 0 || \
+		return 1
+}
+get_pid() {
+	# 尽力获取正确可用的PID
+	case $NAMED_PID_FILE in
+		/*)
+			NAMED_PID_FILE_FULL_PATH="$CHROOT/$NAMED_PID_FILE";;
+		*)
+			NAMED_PID_FILE_FULL_PATH="$CHROOT/$OPTS_directory/$NAMED_PID_FILE"
+	esac
+
+	# 确认NAMED_PID_FILE里取得的PID是否真实
+	if [ -f $NAMED_PID_FILE_FULL_PATH ]; then
+		NAMED_PID=`cat $NAMED_PID_FILE_FULL_PATH 2>/dev/null`
+		pid_is_named && return 0
+	fi
+
+	# 从NAMED_PID_FILE没能获取PID,获取运行中的PID
+	NAMED_PID=$(get_pid_run)
+	if [[ $NAMED_PID ]] && pid_is_named; then
+		return 0
+	else
+		NAMED_PID=
+		return 1
+	fi
+}
+get_pid_run() {
+	NAMED=$( sed -e 's/  / /g' <<< "$NAMED" )
+	pgrep -f -- "$NAMED"$\|"$NAMED "
+}
+get_status() {
+	NAMED_PID=$(get_pid_run)
+	if [ $(echo $NAMED_PID | wc -w) -gt 1 ]; then
+		e_duplicated_porcess
+	fi
+
+	# R_PS=$(ps auwwwx | \
+	# 	grep -v grep | \
+	# 	grep ^"$NAMED_USER " | \
+	# 	grep -e "$CHROOT"$ -e "$CHROOT ")
+	[[ $NAMED_PID ]] && R_PS=$(ps -o user,pid,stat,time,command --pid $NAMED_PID)
+	if [[ $R_PS ]]; then
+		echo "${CYAN_BOLD}By ps${OFF}"
+		echo "$R_PS"
+	else
+		echo "${RED}Nothing found by ps${OFF}"
+	fi
+
+	[[ $NAMED_PID ]] && R_NETSTAT=$(
+	for pid in $NAMED_PID; do
+		netstat -ntulp | grep " $pid/"
+	done)
+	if [[ $R_NETSTAT ]]; then
+		echo
+		echo "${CYAN_BOLD}By netstat${OFF}"
+		echo "$R_NETSTAT"
+	else
+		echo "${RED}Nothing found by netstat${OFF}"
+	fi
+}
+check_conf() {
+	named-checkconf -t $CHROOT $NAMED_CONF
+}
+start_named() {
+	# first, be sure that there's no process already running
+	if get_pid; then
+		echo "bind in $CHROOT already running $GREEN_BOLD:-)$OFF"
+		return 0
+	else
+		# no named running
+		true
+	fi
+
+	# start it
+	cl
+	echo -ne "Starting bind in $CHROOT ...\t"
+	if nice -n -12 $NAMED; then
+		get_pid
+		if [[ $NAMED_PID ]]; then
+			echo "OK, started $NAMED_PID"
+		else
+			echo "Failed, cannot get pid"
+		fi
+	else
+		echo "Failed to start, you can debug it by set DEBUG=1"
+		echo "Command: nice -n -12 $NAMED"
+	fi
+
+	# for debug
+	if [ $DEBUG -eq -1 ]; then
+		get_pid
+		echo "$RED_BOLD bind just started with pid $NAMED_PID $OFF"
+
+		ps auwxww | grep -v grep | grep "$CHROOT"
+		[[ $NAMED_PID ]] && netstat -ntulp | grep $NAMED_PID/
+	fi
+}
+stop_named() {
+	echo -ne "Stopping bind in $CHROOT ...\t"
+	get_pid || {
+		e_no_running_named
+		return 1
+	}
+
+	if [[ $NAMED_PID ]]; then
+		# kill -TERM $NAMED_PID && \
+		kill -9 $NAMED_PID && \
+			echo "OK, killed "$NAMED_PID || \
+			echo "Failed, please check NAMED_PID by hand: "$NAMED_PID
+	else
+		e_no_running_named
+		exit 2
+	fi
+
+	# bind won't quit immediatelly, so wait some time ...
+	local t
+	for t in $(seq 1 $NAMED_DEAD_TIME | tac); do
+		echo -ne "Waiting bind for fully quit ... $t"
+
+		get_pid
+		if [[ $NAMED_PID ]]; then
+			# get_status	# for debug
+			sleep 1
+		else
+			cl
+			return 0
+		fi
+		cl
+		unset NAMED_PID
+	done
+
+	unset NAMED_PID
+}
+rndc_wrapper() {
+	if [ -e $RNDC_CONF ]; then
+		rndc -c $RNDC_CONF $@
+	else
+		echo "$RNDC_CONF not exist, ${RED_BOLD}rndc${OFF} not usable !"
+		exit 1
+	fi
+}
+
+# 报错函数
+cl() {
+	echo -en "\r\e[K\e[0m"
+}
+e_config_error() {
+	echo "Error while checking $NAMED_CONF, exit now"
+	exit 1
+}
+e_domainname_needed() {
+	echo "I need a valid domain name"
+	exit 1
+}
+e_no_running_named() {
+	cl
+	echo "No running bind in $CHROOT $RED_BOLD:-($OFF"
+}
+e_duplicated_porcess() {
+	echo
+	echo "  ${RED_BOLD}Duplicated running bind detected${OFF}"
+	echo
+}
+
+[ $(echo $(get_pid_run) | wc -w) -gt 1 ] && e_duplicated_porcess
+
+# main
+# Take action based on subcommands/options.
+case "$1" in
+	start)
+		if check_conf; then
+			start_named
+		else
+			e_config_error
+		fi
+		;;
+	stop)
+		if check_conf; then
+			stop_named
+		else
+			e_config_error
+		fi
+		;;
+	cs|clean_stop)
+		NAMED_PID=$(get_pid_run)
+		if [[ $NAMED_PID ]]; then
+			echo -ne "Stopping bind in $CHROOT ...\t"
+			kill -TERM $NAMED_PID && \
+				echo "OK, killed "$NAMED_PID || \
+				echo "Failed, please check NAMED_PID by hand: "$NAMED_PID
+		else
+			e_no_running_named
+		fi
+
+		# clean pid file
+		[ -f $NAMED_PID_FILE_FULL_PATH ] && \
+			rm -f $NAMED_PID_FILE_FULL_PATH >/dev/null 2>&1
+		;;
+	restart)
+		if check_conf; then
+			stop_named
+			start_named
+		else
+			e_config_error
+		fi
+		;;
+	s|status)
+		get_status
+		;;
+	as|all_status)
+		R_PS=$(ps auwwwx | grep -v grep | grep "named ")
+		if [[ $R_PS ]]; then
+			echo "By ps"
+			echo "$R_PS"
+		else
+			echo "Nothing found by ps"
+		fi
+	
+		R_NETSTAT_UDP=$(netstat -nulp | sort -k 6 -n | grep "named")
+		R_NETSTAT_TCP=$(netstat -ntlp | sort -k 7 -n | grep "named")
+		if [[ $R_NETSTAT_TCP ]] || [[ $R_NETSTAT_UDP ]]; then
+			echo
+			echo "By netstat"
+			echo "$R_NETSTAT_TCP"
+			echo "$R_NETSTAT_UDP"
+		else
+			echo "Nothing found by netstat"
+		fi
+		;;
+	ak|all_kill)
+		echo "  ${RED_BOLD}You should ${GREEN_BOLD}never${RED_BOLD} have this ${GREEN_BOLD}idea${RED_BOLD} in mind !${OFF}";;
+	c|check)
+		check_conf && echo "No error";;
+	r|reload)
+		check_conf && rndc_wrapper reload || e_config_error;;
+	rf|refresh)
+		[[ $2 ]] && rndc_wrapper refresh $2 || e_domainname_needed;;
+	rndc)
+		shift
+		rndc_wrapper $@;;
+	rt|retransfer)
+		[[ $2 ]] && rndc_wrapper retransfer $2 || e_domainname_needed;;
+	n|notify)
+		[[ $2 ]] && rndc_wrapper notify $2 || e_domainname_needed;;
+	rs|rndc_status)
+		rndc_wrapper status;;
+	f|flush)
+		[[ $2 ]] && rndc_wrapper flushname $2 || rndc_wrapper flush;;
+	fn|flushname)
+		if [[ $2 ]]; then
+			for n in $@; do
+				rndc_wrapper flushname $n || \
+					e_domainname_needed
+			done
+		else
+			echo "At least one name is needed"
+			echo
+			print_help
+		fi
+		;;
+	ft|flushtree)
+		if [[ $2 ]]; then
+			case $(named -v) in
+				"BIND 9.9"*)
+					rndc_wrapper flushtree $2;;
+				*)
+					echo "Only usable for BIND-9.9.x"
+			esac
+		else
+			e_domainname_needed
+		fi
+		;;
+	h|help|-h|--help)
+		print_help --full;;
+	*)
+		print_help
+esac
